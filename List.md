@@ -3,7 +3,7 @@
 ### 单向链表
 
 定义：前一个结点都有一个箭头指向后一个节点，首尾相连，组成一个圈。
-![1632384353885](./Picture/ListPic/SinglyLinkedList.png)
+![image0](./Picture/ListPic/SinglyLinkedList.png)
 
 #### 1、节点结构体
 
@@ -36,19 +36,19 @@ stuct userstruct
 };
 ```
 
-![1632377861667](./Picture/ListPic/EmbeddedNode.png)
+![image1](./Picture/ListPic/EmbeddedNode.png)
 
 #### 2、链表操作
 
 链表最大作用就是通过节点把离散的数据链接在一起组成一个表。可以通过节点的插入和删除修改链表，通常会有一个根节点，称这个根节点为生产者。还会有一个节点计数器，由于统计整条链表的节点个数。
 
-![1632378269404](./Picture/ListPic/LinkedListOperation.png)
+![image2](./Picture/ListPic/LinkedListOperation.png)
 
 #### 3、双向链表
 
 每个节点中包含两个结点指针，分别指向前后两个节点。
 
-![1632378394653](./Picture/ListPic/DoublyLinkedList.png)
+![image3](./Picture/ListPic/DoublyLinkedList.png)
 
 ##### 链表和数组
 
