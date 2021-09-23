@@ -36,7 +36,7 @@ stuct userstruct
 };
 ```
 
-![1632377861667](C:\Users\Administrator\AppData\Roaming\Typora\typora-user-images\1632377861667.png)
+![1632377861667](./Picture/ListPic/EmbeddedNode.png)
 
 #### 2、链表操作
 
@@ -145,4 +145,3 @@ void vListInitialise( List_t * const pxList )
 将最后一个节点（也可以理解为第一） 的 pxNext 和 pxPrevious 指针均指向节点自身，表示链表为空 。
 
 初始化链表节点计数器的值为 0，表示链表为空 。
-
