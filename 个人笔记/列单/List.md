@@ -13,7 +13,7 @@
 struct node
 {	
 	struct node *next;       /* 指向链表下一个节点 */
-    char   data1;			 /* 单个数据 */
+    	char   data1;			 /* 单个数据 */
 	unsigned char array[];   /* 数组 */	
 	unsigned long *prt;		 /* 指针数组 */
 	stuct userstruct data2;	 /* 自定义结构体类型数据 */
@@ -30,9 +30,9 @@ struct node
 
 stuct userstruct	 		
 {
-	 /* 在结构体中，内嵌一个节点指针，通过这个节点将数据挂接到链表 */
+	/* 在结构体中，内嵌一个节点指针，通过这个节点将数据挂接到链表 */
 	struct node *next; 
-    /* ...... 要存储的数据类型 */
+	/* ...... 要存储的数据类型 */
 };
 ```
 
