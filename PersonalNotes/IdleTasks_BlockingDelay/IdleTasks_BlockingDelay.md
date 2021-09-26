@@ -194,3 +194,63 @@ void vTaskSwitchContext( void )
 #endif
 ```
 
+- 如果当前任务是空闲任务，那么就去尝试执行任务 1 或者任务 2，
+  看看他们的延时时间是否结束，如果任务的延时时间均没有到期，那就返回继续执行空闲
+  任务。 
+- 如果当前任务是任务 1 或者任务 2 的话，检查下另外一个任务， 如
+  果另外的任务不在延时中，就切换到该任务。 否则，判断下当前任务是否应该进入延时状
+  态，如果是的话，就切换到空闲任务， 否则就不进行任何切换 。 
+
+#### 3、SysTick 中断服务函数 
+
+在任务上下文切换函数` vTaskSwitchContext ()`中，会判断每个任务的任务控制块中的延时成员 `xTicksToDelay` 的值是否为 0，如果为 0 就要将对应的任务就绪， 如果不为 0 就继续延时。如果一个任务要延时，一开始 `xTicksToDelay `肯定不为 0，当` xTicksToDelay` 变为0 的时候表示延时结束 。<font size=2>（SysTick 中断服务函数在 port.c.c 中实现 ）</font>
+
+```c++
+void xPortSysTickHandler( void )
+{
+    /* 进入临界段，关中断 */
+    /* 关中断 */
+    vPortRaiseBASEPRI();
+
+    /* 更新系统时基 */
+    xTaskIncrementTick();
+
+    /* 开中断 */
+    vPortClearBASEPRIFromISR();
+}
+```
+
+##### 3.1、xTaskIncrementTick()函数 
+
+```c++
+void xTaskIncrementTick( void )
+{
+    TCB_t *pxTCB = NULL;
+    BaseType_t i = 0;
+
+    /* 更新系统时基计数器 xTickCount， xTickCount 是一个在 port.c 中定义的全局变量 */
+    const TickType_t xConstTickCount = xTickCount + 1;
+    xTickCount = xConstTickCount;
+
+    /* 扫描就绪列表中所有任务的 xTicksToDelay，如果不为 0，则减 1 */
+    for (i = 0; i < configMAX_PRIORITIES; i++) {
+        pxTCB = ( TCB_t * ) listGET_OWNER_OF_HEAD_ENTRY( ( &pxReadyTasksLists[i] ) );
+        if (pxTCB->xTicksToDelay > 0) {
+        	pxTCB->xTicksToDelay--;
+        }
+    }
+
+    /* 任务切换 */
+    portYIELD();
+}
+```
+
+- 更新系统时基计数器 xTickCount， 加一操作。 xTickCount 是一个在
+  port.c 中定义的全局变量， 在函数 vTaskStartScheduler()中调用 xPortStartScheduler()函数前
+  初始化。 
+- 扫描就绪列表中所有任务的 xTicksToDelay，如果不为 0，则减 1。 
+- 执行一次任务切换。 
+- 退出临界段，开中断。 
+
+#### 4、SysTick 初始化函数 
+
