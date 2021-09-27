@@ -33,9 +33,9 @@ TCB_t IdleTaskTCB;
 
 ```c++
 extern TCB_t IdleTaskTCB;
-void vApplicationGetIdleTaskMemory( TCB_t **ppxIdleTaskTCBBuffer,
-									StackType_t **ppxIdleTaskStackBuffer,
-									uint32_t *pulIdleTaskStackSize );
+void vApplicationGetIdleTaskMemory( 	TCB_t **ppxIdleTaskTCBBuffer,
+					StackType_t **ppxIdleTaskStackBuffer,
+					uint32_t *pulIdleTaskStackSize );
 void vTaskStartScheduler( void )
 {
 /*=======================创建空闲任务 start=======================*/
@@ -45,8 +45,8 @@ void vTaskStartScheduler( void )
 
     /* 获取空闲任务的内存：任务栈和任务 TCB */
     vApplicationGetIdleTaskMemory( 	&pxIdleTaskTCBBuffer,
-                                    &pxIdleTaskStackBuffer,
-                                    &ulIdleTaskStackSize );
+                                    	&pxIdleTaskStackBuffer,
+                                    	&ulIdleTaskStackSize );
     /* 创建空闲任务 */
     xIdleTaskHandle =
     xTaskCreateStatic( 	(TaskFunction_t)prvIdleTask, /* 任务入口 */
