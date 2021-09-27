@@ -78,9 +78,9 @@ void vTaskStartScheduler( void )
 **vApplicationGetIdleTaskMemory()函数** 
 
 ```c++
-void vApplicationGetIdleTaskMemory( TCB_t **ppxIdleTaskTCBBuffer,
-									StackType_t **ppxIdleTaskStackBuffer,
-									uint32_t *pulIdleTaskStackSize )
+void vApplicationGetIdleTaskMemory(     TCB_t **ppxIdleTaskTCBBuffer,
+					StackType_t **ppxIdleTaskStackBuffer,
+					uint32_t *pulIdleTaskStackSize )
 {
 	*ppxIdleTaskTCBBuffer=&IdleTaskTCB;
 	*ppxIdleTaskStackBuffer=IdleTaskStack;
@@ -146,7 +146,8 @@ typedef struct tskTaskControlBlock
 ```c++
 #if 0
 void vTaskSwitchContext( void )
-{ /* 两个任务轮流切换 */
+{ 
+    /* 两个任务轮流切换 */
     if ( pxCurrentTCB == &Task1TCB ) {
     	pxCurrentTCB = &Task2TCB;
     } else {
