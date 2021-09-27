@@ -254,3 +254,244 @@ void xTaskIncrementTick( void )
 
 #### 4、SysTick 初始化函数 
 
+**vPortSetupTimerInterrupt()函数** 
+
+```c++
+/* SysTick 控制寄存器 */ 
+#define portNVIC_SYSTICK_CTRL_REG (*((volatile uint32_t *) 0xe000e010 ))
+/* SysTick 重装载寄存器寄存器 */
+#define portNVIC_SYSTICK_LOAD_REG (*((volatile uint32_t *) 0xe000e014 ))
+
+/* SysTick 时钟源选择 */
+#ifndef configSYSTICK_CLOCK_HZ
+#define configSYSTICK_CLOCK_HZ configCPU_CLOCK_HZ
+/* 确保 SysTick 的时钟与内核时钟一致 */
+#define portNVIC_SYSTICK_CLK_BIT ( 1UL << 2UL )
+#else
+#define portNVIC_SYSTICK_CLK_BIT ( 0 )
+#endif
+
+#define portNVIC_SYSTICK_INT_BIT ( 1UL << 1UL )
+#define portNVIC_SYSTICK_ENABLE_BIT ( 1UL << 0UL )
+
+
+void vPortSetupTimerInterrupt( void ) 
+{
+    /*  设置重装载寄存器的值 */ 
+	portNVIC_SYSTICK_LOAD_REG = ( configSYSTICK_CLOCK_HZ / configTICK_RATE_HZ ) - 	1UL;
+
+    /* 	设置系统定时器的时钟等于内核时钟
+        使能 SysTick 定时器中断
+        使能 SysTick 定时器 */
+    portNVIC_SYSTICK_CTRL_REG = ( portNVIC_SYSTICK_CLK_BIT |
+                                 portNVIC_SYSTICK_INT_BIT |
+                                 portNVIC_SYSTICK_ENABLE_BIT );
+}
+```
+
+- 配置 SysTick 需要用到的寄存器和宏定义，在 port.c 中实现。 
+- SysTick 初 始 化 函 数 vPortSetupTimerInterrupt() ， 在
+  xPortStartScheduler()中被调用 。
+- 设置重装载寄存器的值， 决定 `SysTick `的中断周期。 如 果 没 有 定 义 `configSYSTICK_CLOCK_HZ` 那 么
+  `configSYSTICK_CLOCK_HZ` 就 等 于 `configCPU_CLOCK_HZ` ，`configSYSTICK_CLOCK_HZ` 确 实 没 有 定 义 ， 则 `configSYSTICK_CLOCK_HZ `由 在`FreeRTOSConfig.h `中定义的` configCPU_CLOCK_HZ` 决定， 同时 `configTICK_RATE_HZ` 也在 `FreeRTOSConfig.h `中定义 
+
+**vPortSetupTimerInterrupt()** 
+
+```c++
+BaseType_t xPortStartScheduler( void )
+{
+    /* 配置 PendSV 和 SysTick 的中断优先级为最低 */
+    portNVIC_SYSPRI2_REG |= portNVIC_PENDSV_PRI;
+    portNVIC_SYSPRI2_REG |= portNVIC_SYSTICK_PRI;
+
+    /* 初始化 SysTick */
+    vPortSetupTimerInterrupt();
+
+    /* 启动第一个任务，不再返回 */
+    prvStartFirstTask();
+
+    /* 不应该运行到这里 */
+    return 0;
+}
+```
+
+**configCPU_CLOCK_HZ 与 configTICK_RATE_HZ 宏定义** 
+
+```c++
+#define configCPU_CLOCK_HZ (( unsigned long ) 25000000) 
+#define configTICK_RATE_HZ (( TickType_t ) 100)
+```
+
+- 系统时钟的大小，因为目前是软件仿真，需要配置成与`system_ARMCM3.c`(`system_ARMCM4.c` 或 `system_ARMCM7.c`)文件中的` SYSTEM_CLOCK`的一样， 即等于 25M。如果有具体的硬件，则配置成与硬件的系统时钟一样。 
+- SysTick 每秒中断多少次，目前配置为 100，即每 10ms 中断一次。 
+- 设置系统定时器的时钟等于内核时钟，使能 SysTick 定时器中断，使能 SysTick 定时器。 
+
+#### 5、main函数
+
+```c++
+/*
+*************************************************************************
+* 包含的头文件
+*************************************************************************
+*/
+#include "FreeRTOS.h"
+#include "task.h"
+
+/*
+ *************************************************************************
+ * 全局变量
+ *************************************************************************
+ */
+portCHAR flag1;
+portCHAR flag2;
+
+extern List_t pxReadyTasksLists[ configMAX_PRIORITIES ];
+
+
+/*
+ *************************************************************************
+ * 任务控制块 & STACK
+ *************************************************************************
+ */
+TaskHandle_t Task1_Handle;
+#define TASK1_STACK_SIZE 128
+StackType_t Task1Stack[TASK1_STACK_SIZE];
+TCB_t Task1TCB;
+
+TaskHandle_t Task2_Handle;
+#define TASK2_STACK_SIZE 128
+StackType_t Task2Stack[TASK2_STACK_SIZE];
+TCB_t Task2TCB;
+
+
+/*
+ *************************************************************************
+ * 函数声明
+ *************************************************************************
+ */
+void delay (uint32_t count);
+void Task1_Entry( void *p_arg );
+void Task2_Entry( void *p_arg );
+
+/*
+ ************************************************************************
+ * main 函数
+ ************************************************************************
+ */
+
+int main(void)
+{
+    /* 硬件初始化 */
+    /* 将硬件相关的初始化放在这里，如果是软件仿真则没有相关初始化代码 */
+
+    /* 初始化与任务相关的列表，如就绪列表 */
+    prvInitialiseTaskLists();
+
+    /* 创建任务 */
+    Task1_Handle =
+        xTaskCreateStatic( (TaskFunction_t)Task1_Entry, /* 任务入口 */
+                          (char *)"Task1", /* 任务名称，字符串形式 */
+                          (uint32_t)TASK1_STACK_SIZE , /* 任务栈大小，单位为字 */
+                          (void *) NULL, /* 任务形参 */
+                          (StackType_t *)Task1Stack, /* 任务栈起始地址 */
+                          (TCB_t *)&Task1TCB ); /* 任务控制块 */
+    /* 将任务添加到就绪列表 */
+    vListInsertEnd( &( pxReadyTasksLists[1] ),
+                   &( ((TCB_t *)(&Task1TCB))->xStateListItem ) );
+
+    Task2_Handle =
+        xTaskCreateStatic( (TaskFunction_t)Task2_Entry, /* 任务入口 */
+                          (char *)"Task2", /* 任务名称，字符串形式 */
+                          (uint32_t)TASK2_STACK_SIZE , /* 任务栈大小，单位为字 */
+                          (void *) NULL, /* 任务形参 */
+                          (StackType_t *)Task2Stack, /* 任务栈起始地址 */
+                          (TCB_t *)&Task2TCB ); /* 任务控制块 */
+    /* 将任务添加到就绪列表 */
+    vListInsertEnd( &( pxReadyTasksLists[2] ),
+                   &( ((TCB_t *)(&Task2TCB))->xStateListItem ) );
+
+    /* 启动调度器，开始多任务调度，启动成功则不返回 */
+    vTaskStartScheduler();
+
+    for (;;)
+    {
+        /* 系统启动成功不会到达这里 */
+    }
+}
+
+/*
+ *************************************************************************
+ * 函数实现
+ *************************************************************************
+ */
+/* 软件延时 */
+void delay (uint32_t count)
+{
+    for (; count!=0; count--);
+}
+/* 任务 1 */
+void Task1_Entry( void *p_arg )
+{
+    for ( ;; )
+    {
+        #if 0
+        flag1 = 1;
+        delay( 100 );
+        flag1 = 0;
+        delay( 100 );
+
+        /* 任务切换，这里是手动切换 */
+        portYIELD();
+        #else
+        flag1 = 1;
+        vTaskDelay( 2 );
+        flag1 = 0;
+        vTaskDelay( 2 );
+        #endif
+    }
+}
+
+/* 任务 2 */
+void Task2_Entry( void *p_arg )
+{
+    for ( ;; )
+    {
+        #if 0
+        flag2 = 1;
+        delay( 100 );
+        flag2 = 0;
+        delay( 100 );
+
+        /* 任务切换，这里是手动切换 */
+        portYIELD();
+        #else
+        flag2 = 1;
+        vTaskDelay( 2 );
+        flag2 = 0;
+        vTaskDelay( 2 );
+        #endif
+    }
+}
+
+/* 获取空闲任务的内存 */
+StackType_t IdleTaskStack[configMINIMAL_STACK_SIZE];
+TCB_t IdleTaskTCB;
+void vApplicationGetIdleTaskMemory( TCB_t **ppxIdleTaskTCBBuffer,
+                                   StackType_t **ppxIdleTaskStackBuffer,
+                                   uint32_t *pulIdleTaskStackSize )
+{
+    *ppxIdleTaskTCBBuffer=&IdleTaskTCB;
+    *ppxIdleTaskStackBuffer=IdleTaskStack;
+    *pulIdleTaskStackSize=configMINIMAL_STACK_SIZE;
+}
+```
+
+延时函数均由原来的软件延时替代为阻塞延时，延时时间均为 2 个 SysTick 中断周期，即 20ms。 
+
+##### 6、现象
+
+![image0](./Picture/IdleTasks_BlockingDelayPic/Phenomenon1.png)
+
+![image1](./Picture/IdleTasks_BlockingDelayPic/Phenomenon2.png)
+
+![1632705084712](C:\Users\Administrator\AppData\Roaming\Typora\typora-user-images\1632705084712.png)
