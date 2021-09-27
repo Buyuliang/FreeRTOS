@@ -1,7 +1,7 @@
 # FreeRTOS
 FreeRTOS Study Notes
 
-#### 1、[列表与列表项](./PersonalNotes./List/List.md)
+#### 1、[列表与列表项](./PersonalNotes/List/List.md)
 
 #### 2、[任务定义和切换]
 
