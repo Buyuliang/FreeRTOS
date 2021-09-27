@@ -494,5 +494,3 @@ void vApplicationGetIdleTaskMemory( TCB_t **ppxIdleTaskTCBBuffer,
 ![image0](./Picture/IdleTasks_BlockingDelayPic/Phenomenon1.png)
 
 ![image1](./Picture/IdleTasks_BlockingDelayPic/Phenomenon2.png)
-
-![1632705084712](C:\Users\Administrator\AppData\Roaming\Typora\typora-user-images\1632705084712.png)
