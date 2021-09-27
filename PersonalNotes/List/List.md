@@ -118,7 +118,7 @@ struct xMINI_LIST_ITEM
 typedef struct xMINI_LIST_ITEM MiniListItem_t;  /* 精简节点数据类型重定义 */
 ```
 
-#### 4、链表根节点初始化
+##### 4、链表根节点初始化
 
 ```c
 void vListInitialise( List_t * const pxList )
@@ -142,6 +142,226 @@ void vListInitialise( List_t * const pxList )
 
 将链表最后（也可以理解为第一） 一个节点的辅助排序的值设置为最大，确保该节点就是链表的最后节点（也可以理解为第一）。 
 
-将最后一个节点（也可以理解为第一） 的 pxNext 和 pxPrevious 指针均指向节点自身，表示链表为空 。
+将最后一个节点（也可以理解为第一） 的 `pxNext` 和 `pxPrevious` 指针均指向节点自身，表示链表为空 。
 
 初始化链表节点计数器的值为 0，表示链表为空 。
+
+#### 5、节点插入到链表的尾部 
+
+```c++
+void vListInsertEnd( List_t * const pxList, ListItem_t * const pxNewListItem )
+{
+    ListItem_t * const pxIndex = pxList->pxIndex;
+
+    pxNewListItem->pxNext = pxIndex;
+    pxNewListItem->pxPrevious = pxIndex->pxPrevious;
+    pxIndex->pxPrevious->pxNext = pxNewListItem; 
+    pxIndex->pxPrevious = pxNewListItem;
+
+    /* 记住该节点所在的链表 */
+    pxNewListItem->pvContainer = ( void * ) pxList;
+
+    /* 链表节点计数器++ */
+    ( pxList->uxNumberOfItems )++;
+}
+```
+
+#### 6、节点按照升序排列插入到链表 
+
+如果有两个节点的值相同，则新节点在旧节点的后面插入 
+
+```c++
+void vListInsert( List_t * const pxList, ListItem_t * const pxNewListItem )
+{
+    ListItem_t *pxIterator;
+
+    /* 获取节点的排序辅助值 */
+    const TickType_t xValueOfInsertion = pxNewListItem->xItemValue;
+
+    /* 寻找节点要插入的位置 */ 
+    if ( xValueOfInsertion == portMAX_DELAY ) {
+        pxIterator = pxList->xListEnd.pxPrevious;
+    } else {
+		for ( pxIterator = ( ListItem_t * ) &( pxList->xListEnd );
+             pxIterator->pxNext->xItemValue <= xValueOfInsertion;
+             pxIterator = pxIterator->pxNext ) {
+            /* 没有事情可做，不断迭代只为了找到节点要插入的位置 */
+        }
+    }
+    /* 根据升序排列，将节点插入 */ 
+    pxNewListItem->pxNext = pxIterator->pxNext;
+	pxNewListItem->pxNext->pxPrevious = pxNewListItem;
+	pxNewListItem->pxPrevious = pxIterator;
+    pxIterator->pxNext = pxNewListItem;
+
+    /* 记住该节点所在的链表 */
+    pxNewListItem->pvContainer = ( void * ) pxList;
+
+    /* 链表节点计数器++ */
+    ( pxList->uxNumberOfItems )++;
+}
+```
+
+- 获取节点的排序辅助值。 
+- 根据节点的排序辅助值，找到节点要插入的位置，按照升序排列。 
+- 按照升序排列，将节点插入到链表。 假设将一个节点排序辅助值是 2 的节点插入到有两个节点的链表中，这两个现有的节点的排序辅助值分别是 1 和 3 
+
+![image4](./Picture/ListPic/ListSort.png)
+
+#### 7、节点从链表删除 
+
+```c++
+UBaseType_t uxListRemove( ListItem_t * const pxItemToRemove )
+{
+    /* 获取节点所在的链表 */
+    List_t * const pxList = ( List_t * ) pxItemToRemove->pvContainer;
+    /* 将指定的节点从链表删除*/
+    pxItemToRemove->pxNext->pxPrevious = pxItemToRemove->pxPrevious;
+    pxItemToRemove->pxPrevious->pxNext = pxItemToRemove->pxNext;
+
+    /*调整链表的节点索引指针 */
+    if ( pxList->pxIndex == pxItemToRemove ) {
+        pxList->pxIndex = pxItemToRemove->pxPrevious;
+    }
+
+    /* 初始化该节点所在的链表为空，表示节点还没有插入任何链表 */
+    pxItemToRemove->pvContainer = NULL;
+
+    /* 链表节点计数器-- */
+    ( pxList->uxNumberOfItems )--;
+
+    /* 返回链表中剩余节点的个数 */
+    return pxList->uxNumberOfItems;
+}
+```
+
+#### 8、节点带参宏小函数 
+
+```c++
+/* 初始化节点的拥有者 */
+#define listSET_LIST_ITEM_OWNER( pxListItem, pxOwner )\
+								( ( pxListItem )->pvOwner = ( void * ) ( pxOwner ) )
+
+/* 获取节点拥有者 */
+#define listGET_LIST_ITEM_OWNER( pxListItem )\
+								( ( pxListItem )->pvOwner )
+
+/* 初始化节点排序辅助值 */
+#define listSET_LIST_ITEM_VALUE( pxListItem, xValue )\
+								( ( pxListItem )->xItemValue = ( xValue ) )
+
+/* 获取节点排序辅助值 */
+#define listGET_LIST_ITEM_VALUE( pxListItem )\
+								( ( pxListItem )->xItemValue )
+
+/* 获取链表根节点的节点计数器的值 */
+#define listGET_ITEM_VALUE_OF_HEAD_ENTRY( pxList )\
+											( ( ( pxList )->xListEnd ).pxNext->xItemValue )
+
+/* 获取链表的入口节点 */
+#define listGET_HEAD_ENTRY( pxList )\
+							( ( ( pxList )->xListEnd ).pxNext )
+
+/* 获取节点的下一个节点 */
+#define listGET_NEXT( pxListItem )\
+						( ( pxListItem )->pxNext )
+
+/* 获取链表的最后一个节点 */
+#define listGET_END_MARKER( pxList )\
+							( ( ListItem_t const * ) ( &( ( pxList )->xListEnd ) ) )
+
+/* 判断链表是否为空 */
+#define listLIST_IS_EMPTY( pxList )\
+		( ( BaseType_t ) ( ( pxList )->uxNumberOfItems == ( UBaseType_t ) 0 ) )
+
+/* 获取链表的节点数 */
+#define listCURRENT_LIST_LENGTH( pxList )\
+ 								( ( pxList )->uxNumberOfItems )
+
+/* 获取链表第一个节点的 OWNER，即 TCB */
+#define listGET_OWNER_OF_NEXT_ENTRY( pxTCB, pxList )
+{
+    List_t * const pxConstList = ( pxList );
+    /* 节点索引指向链表第一个节点 */ \
+	( pxConstList )->pxIndex = ( pxConstList )->pxIndex->pxNext;
+    /* 这个操作有啥用？ */ \
+	if( ( void * ) ( pxConstList )->pxIndex == ( void * ) &( ( pxConstList )->xListEnd ))
+        {
+            ( pxConstList )->pxIndex = ( pxConstList )->pxIndex->pxNext;
+        }
+    /* 获取节点的 OWNER，即 TCB */ \
+	( pxTCB ) = ( pxConstList )->pxIndex->pvOwner;
+}
+```
+
+#### 9、链表节点插入实验实验 
+
+```c++
+/*
+*************************************************************************
+* 包含的头文件
+*************************************************************************
+*/
+#include "list.h"
+
+/*
+*************************************************************************
+ * 全局变量
+ *************************************************************************
+ */
+
+/* 定义链表根节点 */
+struct xLIST List_Test; (1)
+
+/* 定义节点 */
+struct xLIST_ITEM List_Item1; (2)
+struct xLIST_ITEM List_Item2;
+struct xLIST_ITEM List_Item3;
+
+
+
+/*
+ ************************************************************************
+ * main 函数
+ ************************************************************************
+ */
+/*
+int main(void)
+{
+
+     /* 链表根节点初始化 */
+    vListInitialise( &List_Test );
+
+    /* 节点 1 初始化 */
+    vListInitialiseItem( &List_Item1 );
+    List_Item1.xItemValue = 1;
+
+    /* 节点 2 初始化 */
+    vListInitialiseItem( &List_Item2 );
+    List_Item2.xItemValue = 2;
+
+    /* 节点 3 初始化 */
+    vListInitialiseItem( &List_Item3 );
+    List_Item3.xItemValue = 3;
+
+    /* 将节点插入链表，按照升序排列 */
+    vListInsert( &List_Test, &List_Item2 );
+    vListInsert( &List_Test, &List_Item1 );
+    vListInsert( &List_Test, &List_Item3 );
+
+    for (;;) {
+        /* 啥事不干 */
+    }
+}
+```
+
+- 定义链表根节点，有根了，节点才能在此基础上生长。 
+- 定义 3 个普通节点。 
+- 链表根节点初始化，初始化完毕之后，根节点示意图 
+
+![image5](./Picture/ListPic/RootNodeInitialization.png)
+
+#### 10、实验现象
+
+![image6](./Picture/ListPic/Phenomenon.png)
+
