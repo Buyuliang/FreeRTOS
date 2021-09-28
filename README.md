@@ -7,7 +7,7 @@ FreeRTOS Study Notes
 
 #### 3、[任务定义和切换]
 
-#### 4、[临界段保护]
+#### 4、[临界段保护](./PersonalNotes/CriticalSectionProtection/CriticalSectionProtection.md)
 
 #### 5、[空闲任务和阻塞延时](./PersonalNotes/IdleTasks_BlockingDelay/IdleTasks_BlockingDelay.md)
 

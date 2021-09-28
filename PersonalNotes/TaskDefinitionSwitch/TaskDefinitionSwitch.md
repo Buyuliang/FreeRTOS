@@ -209,6 +209,7 @@ typedef void (*TaskFunction_t)( void * );
 - 任务栈起始地址。 
 - 任务控制块指针。 
 - 定义一个任务句柄 xReturn， 任务句柄用于指向任务的 TCB。 任务句柄的数据类型为 TaskHandle_t。
+- 调用 prvInitialiseNewTask()函数，创建新任务，该函数在 task.c 实现。
 
 **TaskHandle_t 定义** 
 
@@ -217,3 +218,187 @@ typedef void (*TaskFunction_t)( void * );
 typedef void * TaskHandle_t;
 ```
 
+**prvInitialiseNewTask()函数** 
+
+```c++
+static void prvInitialiseNewTask( TaskFunction_t pxTaskCode,
+                                 const char * const pcName, 
+                                 const uint32_t ulStackDepth, 
+                                 void * const pvParameters,
+                                 TaskHandle_t * const pxCreatedTask,
+                                 TCB_t *pxNewTCB )
+
+{
+    StackType_t *pxTopOfStack;
+    UBaseType_t x;
+
+    /* 获取栈顶地址 */
+    pxTopOfStack = pxNewTCB->pxStack + ( ulStackDepth - ( uint32_t ) 1 );
+    /* 向下做 8 字节对齐 */ 
+    pxTopOfStack = ( StackType_t * ) ( ( ( uint32_t ) pxTopOfStack ) & ( ~( ( uint32_t ) 0x0007 ) ) );
+
+    /* 将任务的名字存储在 TCB 中 */ 
+    for ( x = ( UBaseType_t ) 0; x < ( UBaseType_t ) configMAX_TASK_NAME_LEN; x++ )
+    {
+        pxNewTCB->pcTaskName[ x ] = pcName[ x ];
+
+        if ( pcName[ x ] == 0x00 )
+        {
+            break;
+        }
+    }
+    /* 任务名字的长度不能超过 configMAX_TASK_NAME_LEN */
+    pxNewTCB->pcTaskName[ configMAX_TASK_NAME_LEN - 1 ] = '\0';
+
+    /* 初始化任务栈 */
+    pxNewTCB->pxTopOfStack = pxPortInitialiseStack( pxTopOfStack, pxTaskCode, pvParameters );
+
+
+    /* 让任务句柄指向任务控制块 */ 
+    if ( ( void * ) pxCreatedTask != NULL )
+    {
+        *pxCreatedTask = ( TaskHandle_t ) pxNewTCB;
+    }
+}
+
+static void prvInitialiseNewTask(TaskFunction_t pxTaskCode,
+                                 const char * const pcName, 
+                                 const uint32_t ulStackDepth,
+                                 void * const pvParameters, 
+                                 TaskHandle_t * const pxCreatedTask, 
+                                 TCB_t *pxNewTCB ) 
+
+{
+    StackType_t *pxTopOfStack;
+    UBaseType_t x;
+
+    /* 获取栈顶地址 */
+    pxTopOfStack = pxNewTCB->pxStack + ( ulStackDepth - ( uint32_t ) 1 );
+    /* 向下做 8 字节对齐 */ 
+    pxTopOfStack = ( StackType_t * ) \
+        ( ( ( uint32_t ) pxTopOfStack ) & ( ~( ( uint32_t ) 0x0007 ) ) );
+
+    /* 将任务的名字存储在 TCB 中 */ 
+    for ( x = ( UBaseType_t ) 0; x < ( UBaseType_t ) configMAX_TASK_NAME_LEN; x++ )
+    {
+        pxNewTCB->pcTaskName[ x ] = pcName[ x ];
+
+        if ( pcName[ x ] == 0x00 )
+        {
+            break;
+        }
+    }
+    /* 任务名字的长度不能超过 configMAX_TASK_NAME_LEN */
+    pxNewTCB->pcTaskName[ configMAX_TASK_NAME_LEN - 1 ] = '\0';
+
+    /* 初始化 TCB 中的 xStateListItem 节点 */ 
+    vListInitialiseItem( &( pxNewTCB->xStateListItem ) );
+    /* 设置 xStateListItem 节点的拥有者 */
+    listSET_LIST_ITEM_OWNER( &( pxNewTCB->xStateListItem ), pxNewTCB );
+
+
+    /* 初始化任务栈 */ 
+    pxNewTCB->pxTopOfStack = pxPortInitialiseStack( pxTopOfStack,
+                                                   pxTaskCode,
+                                                   pvParameters );
+
+
+    /* 让任务句柄指向任务控制块 */ 
+    if ( ( void * ) pxCreatedTask != NULL )
+    {
+        *pxCreatedTask = ( TaskHandle_t ) pxNewTCB;
+    }
+}
+```
+
+- 任务入口。 
+- 任务名称，字符串形式。 
+- 任务栈大小，单位为字。 
+- 任务形参。 
+- 任务句柄。 
+- 任务控制块指针。 
+- 获取栈顶地址 。
+- 将栈顶指针向下做 8 字节对齐。 在 Cortex-M3（ Cortex-M4 或Cortex-M7）内核的单片机中，因为总线宽度是 32 位的，通常只要栈保持 4 字节对齐就行，可这样为啥要 8 字节？难道有哪些操作是 64 位的？确实有，那就是浮点运算，所以要 8 字节对齐（但是目前我们都还没有涉及到浮点运算，只是为了后续兼容浮点运行的考虑）。
+  如果栈顶指针是 8 字节对齐的，在进行向下 8 字节对齐的时候，指针不会移动，如果不是 8 字节对齐的，在做向下 8 字节对齐的时候，就会空出几个字节，不会使用。
+
+- 将任务的名字存储在 TCB 中。 
+- 任务名字的长度不能超过` configMAX_TASK_NAME_LEN`， 并以'\0'结尾。 
+- 初始化 TCB 中的 `xStateListItem` 节点， 即初始化该节点所在的链表为空，表示节点还没有插入任何链表。 
+- 设置` xStateListItem` 节点的拥有者， 即拥有这个节点本身的 TCB。 
+- 调用 `pxPortInitialiseStack()`函数初始化任务栈， 并更新栈顶指针，任务第一次运行的环境参数就存在任务栈中。该函数在 port.c（ port.c 第一次使用需要在`freertos\portable\RVDS\ARM_CM3`（ ARM_CM4 或 ARM_CM7） 文件夹下面新建然后添加到工程` freertos/source` 这个组文件）中定义。
+
+**pxPortInitialiseStack()函数** 
+
+```c++
+#define portINITIAL_XPSR ( 0x01000000 )
+#define portSTART_ADDRESS_MASK ( ( StackType_t ) 0xfffffffeUL )
+
+static void prvTaskExitError( void )
+{
+    /* 函数停止在这里 */
+    for (;;);
+}
+
+StackType_t *pxPortInitialiseStack( StackType_t *pxTopOfStack,
+                                   TaskFunction_t pxCode,
+                                   void *pvParameters )
+{
+    /* 异常发生时，自动加载到 CPU 寄存器的内容 */
+    pxTopOfStack--;
+    *pxTopOfStack = portINITIAL_XPSR;
+    pxTopOfStack--;
+    *pxTopOfStack = ( ( StackType_t ) pxCode ) & portSTART_ADDRESS_MASK;
+    pxTopOfStack--;
+    *pxTopOfStack = ( StackType_t ) prvTaskExitError; 
+    pxTopOfStack -= 5; /* R12, R3, R2 and R1 默认初始化为 0 */
+    *pxTopOfStack = ( StackType_t ) pvParameters;
+
+    /* 异常发生时，手动加载到 CPU 寄存器的内容 */
+    pxTopOfStack -= 8;
+
+    /* 返回栈顶指针，此时 pxTopOfStack 指向空闲栈 */
+    return pxTopOfStack;
+}
+```
+
+![1632792361067](./Picture/TaskDefinitionSwitchPic/TaskStackInitialization.png)
+
+- 异常发生时， CPU 自动从栈中加载到 CPU 寄存器的内容。包括 8个寄存器，分别为 R0、 R1、 R2、 R3、 R12、 R14、 R15 和 xPSR 的位 24，且顺序不能变。 
+- xPSR 的 bit24 必须置 1，即 0x01000000。 
+- 任务的入口地址。 
+- 任务的返回地址，通常任务是不会返回的，如果返回了就跳转到`prvTaskExitError`， 该函数是一个无限循环。 
+- R12, R3, R2 and R1 默认初始化为 0。
+- 异常发生时，需要手动加载到 CPU 寄存器的内容， 总共有 8 个，分别为 R4、 R5、 R6、 R7、 R8、 R9、 R10 和 R11，默认初始化为 0。  
+- 任务第一次
+  运行时，就是从这个栈指针开始手动加载 8 个字的内容到 CPU 寄存器： R4、 R5、 R6、 R7、R8、 R9、 R10 和 R11，当退出异常时，栈中剩下的 8 个字的内容会自动加载到 CPU 寄存器：R0、 R1、 R2、 R3、 R12、 R14、 R15 和 xPSR 的位 24。此时 PC 指针就指向了任务入口地址，从而成功跳转到第一个任务。 
+- 让任务句柄指向任务控制块。
+- 返回任务句柄，如果任务创建成功，此时 xReturn 应该指向任务控制块， xReturn 作为形参传入到 prvInitialiseNewTask 函数。  
+
+#### 2、实现就绪列表
+
+##### 2.1、定义就绪列表 
+
+```c++
+/* 任务就绪列表 */
+List_t pxReadyTasksLists[ configMAX_PRIORITIES ];
+```
+
+- 就绪列表实际上就是一个 List_t 类型的数组，数组的大小由决定最 大 任 务 优 先 级 的 宏 `configMAX_PRIORITIES` 决 定 ， `configMAX_PRIORITIES` 在`FreeRTOSConfig.h `中默认定义为 5，最大支持 256 个优先级。 数组的下标对应了任务的优先级，同一优先级的任务统一插入到就绪列表的同一条链表中。  
+
+##### 2.2、就绪列表初始化 
+
+```c++
+void prvInitialiseTaskLists( void )
+{
+    UBaseType_t uxPriority;
+
+    for ( uxPriority = ( UBaseType_t ) 0U;
+         uxPriority < ( UBaseType_t ) configMAX_PRIORITIES;
+         uxPriority++ )
+    {
+        vListInitialise( &( pxReadyTasksLists[ uxPriority ] ) );
+    }
+}
+```
+
+##### 2.3、将任务插入到就绪列表 
