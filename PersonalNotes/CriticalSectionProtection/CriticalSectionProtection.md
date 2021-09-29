@@ -80,3 +80,193 @@ ulPortRaiseBASEPRI( void )
 -  返回原来 BASEPRI 的值。  
 
 #### **1.2、开中断**
+
+```c++
+/* 不带中断保护的开中断函数 */
+#define portENABLE_INTERRUPTS() vPortSetBASEPRI( 0 ) 
+
+/* 带中断保护的开中断函数 */
+#define portCLEAR_INTERRUPT_MASK_FROM_ISR(x) vPortSetBASEPRI(x)
+
+void vPortSetBASEPRI( uint32_t ulBASEPRI )
+{
+    __asm
+    {
+        msr basepri, ulBASEPRI
+    }
+}
+```
+
+- 开中断函数，具体是将传进来的形参更新到 BASEPRI 寄存器。根据传进来形参的不同，分为中断保护版本与非中断保护版本。 
+
+- 不带中断保护的开中断函数， 直接将` BASEPRI` 的值设置为 0，与`portDISABLE_INTERRUPTS()`成对使用。 
+
+- 带中断保护的开中断函数， 将上一次关中断时保存的 `BASEPRI `的值作为形参 ，与 `portSET_INTERRUPT_MASK_FROM_ISR()`成对使用。 
+
+#### 1.3、进入/退出临界段的宏 
+
+```c++
+#define taskENTER_CRITICAL() portENTER_CRITICAL()
+#define taskENTER_CRITICAL_FROM_ISR() portSET_INTERRUPT_MASK_FROM_ISR()
+#define taskEXIT_CRITICAL() portEXIT_CRITICAL()
+#define taskEXIT_CRITICAL_FROM_ISR( x ) portCLEAR_INTERRUPT_MASK_FROM_ISR( x )
+```
+
+**进入临界段** 
+
+##### 1.3.1、不带中断保护版本，不能嵌套 
+
+```c++
+/* ==========进入临界段， 不带中断保护版本，不能嵌套=============== */
+/* 在 task.h 中定义 */
+#define taskENTER_CRITICAL() portENTER_CRITICAL()
+
+/* 在 portmacro.h 中定义 */
+#define portENTER_CRITICAL() vPortEnterCritical()
+
+/* 在 port.c 中定义 */
+void vPortEnterCritical( void )
+{
+    portDISABLE_INTERRUPTS();
+    uxCriticalNesting++;
+
+    if ( uxCriticalNesting == 1 )
+    {
+        configASSERT( ( portNVIC_INT_CTRL_REG & portVECTACTIVE_MASK ) == 0 );
+    }
+}
+
+/* 在 portmacro.h 中定义 */
+#define portDISABLE_INTERRUPTS() vPortRaiseBASEPRI()
+
+/* 在 portmacro.h 中定义 */
+static portFORCE_INLINE void vPortRaiseBASEPRI( void )
+{
+    uint32_t ulNewBASEPRI = configMAX_SYSCALL_INTERRUPT_PRIORITY;
+
+    __asm
+    {
+        msr basepri, ulNewBASEPRI
+            dsb
+            isb
+    }
+}
+```
+
+- `uxCriticalNesting` 是在` port.c `中定义的静态变量，表示临界段嵌套计数 器 ， 默 认 初 始 化 为 `0xaaaaaaaa` ， 在 调 度 器 启 动 时 会 被 重 新 初 始 化 为 `0 ：vTaskStartScheduler()->xPortStartScheduler()->uxCriticalNesting = 0`。 
+
+- 如果 uxCriticalNesting 等于 1，即一层嵌套，要确保当前没有中断活跃，即内核外设 SCB 中的中断和控制寄存器 SCB_ICSR 的低 8 位要等于 0。 
+
+##### 1.3.2、带中断保护版本，可以嵌套 
+
+```c++
+/* ==========进入临界段，带中断保护版本，可以嵌套=============== */
+/* 在 task.h 中定义 */
+#define taskENTER_CRITICAL_FROM_ISR() portSET_INTERRUPT_MASK_FROM_ISR()
+
+/* 在 portmacro.h 中定义 */
+#define portSET_INTERRUPT_MASK_FROM_ISR()
+PortRaiseBASEPRI()
+
+/* 在 portmacro.h 中定义 */
+static portFORCE_INLINE uint32_t ulPortRaiseBASEPRI( void )
+{
+    uint32_t ulReturn, ulNewBASEPRI = configMAX_SYSCALL_INTERRUPT_PRIORITY;
+
+    __asm
+    {
+		mrs ulReturn, basepri
+		msr basepri, ulNewBASEPRI
+		dsb
+		isb
+    }
+
+    return ulReturn;
+}
+```
+
+#### 1.4、退出临界段 
+
+##### 1.4.1、不带中断保护的版本，不能嵌套 
+
+```c++
+/* ==========退出临界段，不带中断保护版本，不能嵌套=============== */
+/* 在 task.h 中定义 */
+#define taskEXIT_CRITICAL() portEXIT_CRITICAL()
+
+/* 在 portmacro.h 中定义 */
+#define portEXIT_CRITICAL() vPortExitCritical()
+
+/* 在 port.c 中定义 */
+void vPortExitCritical( void )
+{
+    configASSERT( uxCriticalNesting );
+    uxCriticalNesting--;
+    if ( uxCriticalNesting == 0 )
+    {
+        portENABLE_INTERRUPTS();
+    }
+}
+
+/* 在 portmacro.h 中定义 */
+#define portENABLE_INTERRUPTS() vPortSetBASEPRI( 0 )
+
+/* 在 portmacro.h 中定义 */
+static portFORCE_INLINE void vPortSetBASEPRI( uint32_t ulBASEPRI )
+{
+    __asm
+    {
+        msr basepri, ulBASEPRI
+    }
+}
+```
+
+##### 1.4.2、带中断保护的版本，可以嵌套 
+
+```c++
+/* ==========退出临界段，带中断保护版本，可以嵌套=============== */
+/* 在 task.h 中定义 */
+#define taskEXIT_CRITICAL_FROM_ISR( x ) portCLEAR_INTERRUPT_MASK_FROM_ISR( x )
+
+/* 在 portmacro.h 中定义 */
+#define portCLEAR_INTERRUPT_MASK_FROM_ISR(x) vPortSetBASEPRI(x)
+
+/* 在 portmacro.h 中定义 */
+static portFORCE_INLINE void vPortSetBASEPRI( uint32_t ulBASEPRI )
+{
+    __asm
+    {
+        msr basepri, ulBASEPRI
+    }
+}
+```
+
+#### 1.5、临界段代码的应用 
+
+在 FreeRTOS 中，对临界段的保护出现在两种场合，一种是在中断场合一种是在非中断场合 
+
+```c++
+/* 在中断场合，临界段可以嵌套 */
+{
+    uint32_t ulReturn;
+    /* 进入临界段，临界段可以嵌套 */
+    ulReturn = taskENTER_CRITICAL_FROM_ISR();
+
+    /* 临界段代码 */
+
+    /* 退出临界段 */
+    taskEXIT_CRITICAL_FROM_ISR( ulReturn );
+}
+
+/* 在非中断场合，临界段不能嵌套 */
+{
+    /* 进入临界段 */
+    taskENTER_CRITICAL();
+
+    /* 临界段代码 */
+
+    /* 退出临界段*/
+    taskEXIT_CRITICAL();
+}
+```
+
