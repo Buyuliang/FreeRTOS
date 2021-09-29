@@ -9,9 +9,9 @@ FreeRTOS Study Notes
 
 #### 4、[空闲任务和阻塞延时](./PersonalNotes/IdleTasks_BlockingDelay/IdleTasks_BlockingDelay.md)
 
-#### 5、[支持多优先级](./PersonalNotes/CriticalSectionProtection/CriticalSectionProtection.md
+#### 5、[支持多优先级](./PersonalNotes/MultiplePriority/MultiplePriority.md)
 
-#### 6、[任务延时列表](./PersonalNotes/CriticalSectionProtection/CriticalSectionProtection.md
+#### 6、[任务延时列表](./PersonalNotes/TaskDelayList/TaskDelayList.md)
 
 #### 7、[时间片](./PersonalNotes/TimeSlice/TimeSlice.md)
 
