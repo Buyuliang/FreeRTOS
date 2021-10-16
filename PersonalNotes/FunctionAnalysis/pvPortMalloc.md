@@ -245,7 +245,8 @@ size_t xTotalHeapSize = configTOTAL_HEAP_SIZE;	/*堆大小*/
 	/*第一个空闲块 大小为 堆末尾的结构体地址 - 堆对齐的起始地址*/
     
 	/* Only one block exists - and it covers the entire usable heap space. */
-    /*	static size_t xFreeBytesRemaining = 0U;static size_t 						xMinimumEverFreeBytesRemaining = 0U;
+    /*	static size_t xFreeBytesRemaining = 0U;static size_t 						
+    	xMinimumEverFreeBytesRemaining = 0U;
     */
 	xMinimumEverFreeBytesRemaining = pxFirstFreeBlock->xBlockSize;
 	xFreeBytesRemaining = pxFirstFreeBlock->xBlockSize;
