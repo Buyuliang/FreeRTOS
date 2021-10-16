@@ -1,3 +1,6 @@
+### pvPortMalloc函数分析
+
+```c++
 void *pvPortMalloc( size_t xWantedSize )
 {
 BlockLink_t *pxBlock, *pxPreviousBlock, *pxNewBlockLink;
@@ -160,3 +163,99 @@ void *pvReturn = NULL;
 	configASSERT( ( ( ( size_t ) pvReturn ) & ( size_t ) portBYTE_ALIGNMENT_MASK ) == 0 );
 	return pvReturn;
 }
+```
+
+`BlockLink_t`结构体
+
+定义连接列表结构体，连接空闲块
+
+```
+typedef struct A_BLOCK_LINK
+{
+	struct A_BLOCK_LINK *pxNextFreeBlock;	/*<< The next free block in the list. 下个空闲块*/
+	size_t xBlockSize;						/*<< The size of the free block. */
+} BlockLink_t;
+```
+
+```c++
+void vTaskSuspendAll( void )
+{
+	/* A critical section is not required as the variable is of type
+	BaseType_t.  Please read Richard Barry's reply in the following link to a
+	post in the FreeRTOS support forum before reporting this as a bug! -
+	http://goo.gl/wu4acr */
+	++uxSchedulerSuspended;
+}
+```
+
+`pxEnd`初始值为NULL
+
+```c++
+static BlockLink_t xStart, *pxEnd = NULL;
+```
+
+`prvHeapInit()`函数
+
+```c++
+static void prvHeapInit( void )
+{
+BlockLink_t *pxFirstFreeBlock;	/*指向第一个空闲块的指针*/
+uint8_t *pucAlignedHeap;	/*堆对齐指针*/
+size_t uxAddress;	/*地址*/
+size_t xTotalHeapSize = configTOTAL_HEAP_SIZE;	/*堆大小*/
+
+	/* Ensure the heap starts on a correctly aligned boundary. */
+    /*static uint8_t ucHeap[ configTOTAL_HEAP_SIZE ]; ucHeap为数组地址*/
+	uxAddress = ( size_t ) ucHeap;
+	/*#define portBYTE_ALIGNMENT_MASK ( 0x0007 ) 0b'1111 判断是否是8字节对齐 */
+	if( ( uxAddress & portBYTE_ALIGNMENT_MASK ) != 0 )
+	{
+        /*#define portBYTE_ALIGNMENT			8*/
+		uxAddress += ( portBYTE_ALIGNMENT - 1 );
+		uxAddress &= ~( ( size_t ) portBYTE_ALIGNMENT_MASK );
+        /*将地址按照8字节对齐方式，加到下个对齐的地址*/
+		xTotalHeapSize -= uxAddress - ( size_t ) ucHeap;
+        /*总的堆的大小为 分配空间 - （空出的空间）*/
+	}
+	/*pucAlignedHeap 为对齐后的堆起始地址*/
+	pucAlignedHeap = ( uint8_t * ) uxAddress;
+
+	/* xStart is used to hold a pointer to the first item in the list of free
+	blocks.  The void cast is used to prevent compiler warnings. */
+	xStart.pxNextFreeBlock = ( void * ) pucAlignedHeap;
+	xStart.xBlockSize = ( size_t ) 0;
+    /*xStart指向堆的首地址，空闲块大小为0*/
+
+	/* pxEnd is used to mark the end of the list of free blocks and is inserted
+	at the end of the heap space. */
+	uxAddress = ( ( size_t ) pucAlignedHeap ) + xTotalHeapSize;
+	uxAddress -= xHeapStructSize;
+	uxAddress &= ~( ( size_t ) portBYTE_ALIGNMENT_MASK );
+	pxEnd = ( void * ) uxAddress;
+	pxEnd->xBlockSize = 0;
+	pxEnd->pxNextFreeBlock = NULL;
+    /*在堆的末尾插入一个 pxEnd 结构体
+    uxAddress 此时地址为堆末尾的一个结构体地址*/
+
+	/* To start with there is a single free block that is sized to take up the
+	entire heap space, minus the space taken by pxEnd. */
+	pxFirstFreeBlock = ( void * ) pucAlignedHeap;
+	pxFirstFreeBlock->xBlockSize = uxAddress - ( size_t ) pxFirstFreeBlock;
+	pxFirstFreeBlock->pxNextFreeBlock = pxEnd;
+	/*第一个空闲块 大小为 堆末尾的结构体地址 - 堆对齐的起始地址*/
+    
+	/* Only one block exists - and it covers the entire usable heap space. */
+    /*	static size_t xFreeBytesRemaining = 0U;static size_t 						xMinimumEverFreeBytesRemaining = 0U;
+    */
+	xMinimumEverFreeBytesRemaining = pxFirstFreeBlock->xBlockSize;
+	xFreeBytesRemaining = pxFirstFreeBlock->xBlockSize;
+
+	/* Work out the position of the top bit in a size_t variable. */
+    /*	static size_t xBlockAllocatedBit = 0;
+    	#define heapBITS_PER_BYTE		( ( size_t ) 8 )
+    	计算出 size_t 类型变量 最高位
+    */
+	xBlockAllocatedBit = ( ( size_t ) 1 ) << ( ( sizeof( size_t ) * heapBITS_PER_BYTE ) - 1 );
+}
+```
+
