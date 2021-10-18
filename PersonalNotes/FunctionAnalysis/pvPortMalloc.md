@@ -69,7 +69,7 @@ void *pvReturn = NULL;
 
 				/* If the end marker was reached then a block of adequate size
 				was	not found.
-                如果是块空间小于想要的块大小
+                如果是块空间大于想要的块大小
                 */
 				if( pxBlock != pxEnd )
 				{
