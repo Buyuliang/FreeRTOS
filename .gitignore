@@ -1,0 +1,6 @@
+tools/
+build/
+*.o
+*.elf
+*.bin
+*.map
