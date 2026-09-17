@@ -3,6 +3,9 @@
 # Usage: ./build.sh [-v|--verbose]
 #   -v / --verbose : print every compile & link command, plus gcc internals
 #                    (cc1 / as / collect2 / ld sub-processes via gcc -v).
+#
+# Our own sources are auto-discovered from src/*.c and src/*.S, so adding a new
+# file to src/ is picked up automatically (compiled, logged, and linked).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 cd "$HERE"
@@ -20,36 +23,35 @@ FR="$HERE/freertos"
 [ -x "$TC/xtensa-esp32s3-elf-gcc" ] || { echo "toolchain missing -> run ./setup.sh"; exit 1; }
 export PATH="$TC:$PATH"
 GCC=xtensa-esp32s3-elf-gcc
-OUT="$HERE/build"; mkdir -p "$OUT"
+OUT="$HERE/build"; rm -f "$OUT"/*.o 2>/dev/null || true; mkdir -p "$OUT"
 
 VFLAG=""
 [ "$VERBOSE" = 1 ] && VFLAG="-v"
-
-# echo the command (verbose) then run it
-run() {
-    [ "$VERBOSE" = 1 ] && printf '\n\033[36m$ %s\033[0m\n' "$*"
-    "$@"
-}
+run() { [ "$VERBOSE" = 1 ] && printf '\n\033[36m$ %s\033[0m\n' "$*"; "$@"; }
 
 CFLAGS="-mabi=call0 -mtext-section-literals -Os -ffreestanding -fno-builtin -fno-builtin-printf \
         -ffunction-sections -fdata-sections -nostdlib -nostartfiles -Wall \
         -I$HERE/src -I$FR/include"
 
-echo "== compile =="
-run $GCC $CFLAGS $VFLAG -c src/start.S    -o "$OUT/start.o"
-run $GCC $CFLAGS $VFLAG -c src/portasm.S  -o "$OUT/portasm.o"
-run $GCC $CFLAGS $VFLAG -c src/port.c     -o "$OUT/port.o"
-run $GCC $CFLAGS $VFLAG -c src/libc_min.c -o "$OUT/libc_min.o"
-run $GCC $CFLAGS $VFLAG -c src/main.c     -o "$OUT/main.o"
-run $GCC $CFLAGS $VFLAG -c "$FR/tasks.c"  -o "$OUT/tasks.o"
-run $GCC $CFLAGS $VFLAG -c "$FR/list.c"   -o "$OUT/list.o"
-run $GCC $CFLAGS $VFLAG -c "$FR/queue.c"  -o "$OUT/queue.o"
-run $GCC $CFLAGS $VFLAG -c "$FR/portable/MemMang/heap_4.c" -o "$OUT/heap_4.o"
+# our sources: auto-discovered from src/ (any new .c/.S is picked up)
+OUR_SRCS=$(ls src/*.c src/*.S 2>/dev/null)
+# FreeRTOS kernel sources: explicit (we don't want to build the whole tree)
+KERNEL_SRCS="$FR/tasks.c $FR/list.c $FR/queue.c $FR/portable/MemMang/heap_4.c"
+
+compile_one() {
+    local src="$1"
+    local obj="$OUT/$(basename "$src").o"   # e.g. build/start.S.o, build/main.c.o
+    run $GCC $CFLAGS $VFLAG -c "$src" -o "$obj"
+}
+
+echo "== compile (our src/) =="
+for s in $OUR_SRCS;    do compile_one "$s"; done
+echo "== compile (freertos kernel) =="
+for s in $KERNEL_SRCS; do compile_one "$s"; done
 
 echo "== link =="
 run $GCC -mabi=call0 -nostdlib -nostartfiles $VFLAG -Wl,-Map="$OUT/app.map" -T src/bare.ld \
-    "$OUT/start.o" "$OUT/portasm.o" "$OUT/port.o" "$OUT/libc_min.o" "$OUT/main.o" \
-    "$OUT/tasks.o" "$OUT/list.o" "$OUT/queue.o" "$OUT/heap_4.o" -o "$OUT/app.elf"
+    "$OUT"/*.o -o "$OUT/app.elf"
 
 "$TC/xtensa-esp32s3-elf-size" "$OUT/app.elf"
 
