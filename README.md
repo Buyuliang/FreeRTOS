@@ -5,8 +5,8 @@
 演示程序创建两个任务,由内核抢占式调度,`vTaskDelay` 由定时器中断驱动。
 **支持烧写 flash 后断电重启自动运行。**
 
-工程自包含:交叉编译器和 esptool 由 `setup.sh` 下载到 `./tools`(已 gitignore),
-仓库里只提交内核源码和我们自己的代码;所有脚本使用**相对路径**,无任何硬编码。
+工程自包含:交叉编译器和 esptool 由 `make setup` 下载到 `./tools`(已 gitignore),
+仓库里只提交内核源码和我们自己的代码;构建用 **Makefile**,所有路径相对,无硬编码。
 
 ---
 
@@ -25,19 +25,18 @@ freertos-esp32s3-test/
 │   ├── main.c          演示:两个任务 + 通过 USB-Serial-JTAG 寄存器打印
 │   └── bare.ld         链接脚本(RAM 镜像的内存布局)
 ├── freertos/           上游 FreeRTOS-Kernel 源码(tasks.c/list.c/queue.c/heap_4.c 会被编译进来)
-├── setup.sh            下载工具链 + esptool 到 ./tools
-├── build.sh            编译 + 链接 + 生成 DIO 镜像 → build/app.bin
-├── run.sh              把镜像加载进 RAM 并监视串口(开发用,掉电即失)
-├── flash.sh            把镜像烧到 flash 0x0(持久化,断电重启自动运行)
-├── tools/              (setup.sh 生成,gitignore)交叉编译器 + esptool
-└── build/              (build.sh 生成,gitignore)中间产物与 app.elf / app.bin
+├── Makefile            构建/烧录/运行/清理(make、make flash、make run、make clean)
+├── monitor.py          串口监视(make run 调用)
+├── setup.sh            下载工具链 + esptool 到 ./tools(由 make setup 调用)
+├── tools/              (make setup 生成,gitignore)交叉编译器 + esptool
+└── build/              (make 生成,gitignore)中间产物与 app.elf / app.bin
 ```
 
 ---
 
 ## 二、环境依赖
 
-- Linux x86_64;命令:`wget`、`curl`、`tar`、`python3`;一根 USB 线连板子。
+- Linux x86_64;命令:`make`、`wget`、`curl`、`tar`、`python3`;一根 USB 线连板子。
 - 板子:ESP32-S3(带原生 USB-Serial-JTAG,本仓库以 N16R8 为例)。
 - 串口:插上后 `ls /dev/ttyACM*`,USB VID 为 `303a` 的那个就是 ESP32-S3(本文示例为 `/dev/ttyACM1`)。
 
@@ -48,14 +47,19 @@ freertos-esp32s3-test/
 ```bash
 git clone -b freertos-esp32s3-test https://github.com/Buyuliang/FreeRTOS.git
 cd FreeRTOS
-./setup.sh                 # 一次性:下载工具链 + esptool 到 ./tools
-./build.sh                 # 编译 → build/app.bin(DIO 镜像)
+make setup                 # 一次性:下载工具链 + esptool 到 ./tools
+make                       # 编译 → build/app.bin(DIO 镜像)
 
-# 开发迭代:加载进 RAM 运行(快、掉电即失)
-./run.sh /dev/ttyACM1
+# 开发迭代:加载进 RAM 运行 + 监视(快、掉电即失)
+make run
 
 # 持久化:烧进 flash,断电重启后自动运行
-./flash.sh /dev/ttyACM1
+make flash
+
+# 换串口 / 详细编译 / 清理
+make run PORT=/dev/ttyACM0
+make V=1                    # 显示每个文件完整编译命令 + gcc 内部 + 链接命令
+make clean
 ```
 
 正常输出:
@@ -76,24 +80,22 @@ A 任务周期 500ms、B 任务 800ms,交替次数约 8:5,证明抢占式调度 
 
 ---
 
-## 四、编译是怎么串起来的(build.sh 详解)
+## 四、编译是怎么串起来的(Makefile 详解)
 
-> 提示:./build.sh -v(或 --verbose)会回显每个文件的完整编译命令、
-> gcc 内部各步(cc1 编译 / as 汇编),以及链接命令(collect2 / ld、-L 路径、链接脚本)。
+> 提示:`make V=1`(或 `make V=1 <目标>`)会回显**每个文件的完整编译命令**、
+> gcc 内部各步(cc1 编译 / as 汇编),以及**链接命令**(collect2 / ld、-L 路径、链接脚本)。
 >
-> **编译哪些文件是显式的**:由 build.sh 里的 SRC_OURS / SRC_KERNEL 两个清单决定,
+> **编译哪些文件是显式的**:由 Makefile 里的 `SRC_OURS` / `SRC_KERNEL` 两个清单决定,
 > 只编清单里的文件(放进 src/ 的无关文件不会被编入固件)。新增源文件时在清单加一行即可,
-> verbose 日志会随之覆盖它。
+> `-MMD` 依赖跟踪会让改到的文件(含头文件)增量重编。
 
-### 4.1 工具从哪来(setup.sh)
-`setup.sh` 做两件事,全部落到相对目录 `./tools`:
-1. 下载**独立** Xtensa 工具链(**不是** ESP-IDF):
-   `xtensa-esp-elf-...-x86_64-linux-gnu.tar.xz` → 解压到 `./tools/xtensa-esp-elf/`,
-   得到 `xtensa-esp32s3-elf-gcc`(S3 的核配置已内建,无需 `-mcpu`)。
-2. 用 `uv` 建一个本地虚拟环境 `./tools/esptool-venv` 并装入 `esptool`(打包/烧录工具)。
+### 4.1 工具从哪来(make setup → setup.sh)
+`make setup` 调 `setup.sh`,把两样东西下载到相对目录 `./tools`:
+1. **独立** Xtensa 工具链(**不是** ESP-IDF):`xtensa-esp-elf-...-x86_64-linux-gnu.tar.xz`
+   → 解压到 `./tools/xtensa-esp-elf/`,得到 `xtensa-esp32s3-elf-gcc`(S3 核配置已内建)。
+2. 用 `uv` 建本地虚拟环境 `./tools/esptool-venv` 并装入 `esptool`。
 
-### 4.2 编译单元
-`build.sh` 用 `xtensa-esp32s3-elf-gcc` 逐个编译成 `.o`(输出到 `./build`):
+### 4.2 编译单元(SRC_OURS / SRC_KERNEL)
 
 | 源文件 | 说明 |
 |---|---|
@@ -105,30 +107,26 @@ A 任务周期 500ms、B 任务 800ms,交替次数约 8:5,证明抢占式调度 
 | `freertos/tasks.c` `list.c` `queue.c` | 内核核心 |
 | `freertos/portable/MemMang/heap_4.c` | 动态内存(pvPortMalloc) |
 
-关键编译选项(在 `build.sh` 的 `CFLAGS`):
-- `-mabi=call0` —— 用 call0 ABI(无寄存器窗口,详见第七节)。
+关键编译选项(Makefile 的 `CFLAGS`):
+- `-mabi=call0` —— call0 ABI(无寄存器窗口,详见第七节)。
 - `-mtext-section-literals` —— 字面量池内联进 .text,便于 l32r 取值。
 - `-ffreestanding -fno-builtin -nostdlib -nostartfiles` —— 无操作系统/无标准库/无默认启动文件。
-- `-I src -I freertos/include` —— 头文件搜索路径(FreeRTOSConfig.h、portmacro.h 在 src)。
+- `-MMD -MP` —— 生成头文件依赖,支持增量编译。
+- `-Isrc -Ifreertos/include` —— 头文件搜索路径。
 
 ### 4.3 链接(src/bare.ld)
-把所有 `.o` 按 `bare.ld` 的内存布局链接成 `build/app.elf`,并指定入口 `ENTRY(_start)`。
-布局要点见第五节。链接后用 `xtensa-esp32s3-elf-size` 看大小。
+把所有 `.o` 按 `bare.ld` 的内存布局链接成 `build/app.elf`,入口 `ENTRY(_start)`。布局见第五节。
 
 ### 4.4 生成镜像
-`esptool elf2image --flash_mode dio --flash_freq 40m --flash_size 16MB` 把 `app.elf`
-转成 Espressif 镜像 `app.bin`:
-- 头部魔数 `0xE9`,记录各段的**加载地址(取自 ELF 的 VMA)**、长度、入口地址(`e_entry`=`_start`)、
-  校验和与 SHA256。
-- **flash 模式必须用 DIO**:ROM 从 flash 启动时会按头里的模式去读后续段;若用 QIO 而该 flash
-  未做四线使能,ROM 切 QIO 后读段失败,报 `ets_loader.c 78` 无限重启。DIO 稳。
-- 我们的镜像是**纯 RAM 镜像**(所有段都落在内部 SRAM,不依赖 flash cache/XIP)。
+`esptool elf2image --flash-mode dio --flash-freq 40m --flash-size 16MB` 把 `app.elf` 转成
+`app.bin`(魔数 `0xE9`,记录各段加载地址=ELF 的 VMA、入口、校验和/SHA256)。
+**flash 模式必须 DIO**:否则 ROM 从 flash 启动切 QIO 读段失败,报 `ets_loader.c 78` 无限重启。
 
 ### 4.5 两种运行方式
-- `run.sh`:`esptool --no-stub load-ram` 通过 ROM 下载协议把段直接写进 SRAM 再跳 `_start`。
-  **RAM 运行、掉电即失**,适合开发迭代;`--no-stub` 必须(否则 esptool 的 stub 占 `0x40378000`)。
-- `flash.sh`:`esptool write-flash 0x0` 把镜像写进 flash 起始处。之后**上电/复位由 ROM
-  从 flash 读进 SRAM 自动运行**(持久化)。
+- `make run`:`esptool --no-stub load-ram` 通过 ROM 下载协议把段写进 SRAM 再跳 `_start`,
+  然后 `monitor.py` 读串口。**RAM 运行、掉电即失**,适合开发;`--no-stub` 必须。
+- `make flash`:`esptool write-flash 0x0` 写进 flash。之后**上电/复位由 ROM 从 flash
+  读进 SRAM 自动运行**(持久化)。
 
 ---
 
@@ -169,10 +167,10 @@ IRAM 窗口(放代码+向量表)         DRAM 窗口(放数据/堆/栈)
 - 两条路:**flash 启动**(正常上电)或**下载模式**(开发时 esptool 触发)。
 
 ### 阶段 1 — 把我们的镜像搬进 SRAM
-- **flash 启动(持久化,`flash.sh` 烧过之后)**:ROM 读 flash `0x0` 的镜像头,按头里的
+- **flash 启动(持久化,`make flash` 烧过之后)**:ROM 读 flash `0x0` 的镜像头,按头里的
   DIO 模式把各段读进它们的加载地址(代码→IRAM 0x40378000,数据→DRAM 0x3FCA8000),
   然后跳 `e_entry`(=`_start`)。这正是上电自启的路径。
-- **下载模式(开发,`run.sh`)**:`esptool --no-stub load-ram` 用 ROM 下载协议的
+- **下载模式(开发,`make run`)**:`esptool --no-stub load-ram` 用 ROM 下载协议的
   `mem_write` 把各段写进 SRAM,再 `mem_finish` 跳 `_start`。掉电即失。
 - 两条路殊途同归:段都在 SRAM 里,CPU 从 `_start` 开始。
 
