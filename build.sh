@@ -29,5 +29,5 @@ $GCC -mabi=call0 -nostdlib -nostartfiles -Wl,-Map="$OUT/app.map" -T src/bare.ld 
      "$OUT/tasks.o" "$OUT/list.o" "$OUT/queue.o" "$OUT/heap_4.o" -o "$OUT/app.elf"
 "$TC/xtensa-esp32s3-elf-size" "$OUT/app.elf"
 echo "== image =="
-"$ESPTOOL" --chip esp32s3 elf2image "$OUT/app.elf" --output "$OUT/app.bin"
+"$ESPTOOL" --chip esp32s3 elf2image --flash_mode dio --flash_freq 40m --flash_size 16MB "$OUT/app.elf" --output "$OUT/app.bin"
 echo "OK -> build/app.bin"

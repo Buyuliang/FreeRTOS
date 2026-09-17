@@ -3,6 +3,7 @@
 在 **ESP32-S3(Xtensa LX7)** 上,不使用 ESP-IDF、从零手写一层 **Xtensa 移植层**
 (向量表 + 上下文切换 + 定时器 tick + 软件中断 yield),把**上游 FreeRTOS 内核**跑起来。
 演示程序创建两个任务,由内核抢占式调度,`vTaskDelay` 由定时器中断驱动。
+**支持烧写 flash 后断电重启自动运行。**
 
 工程自包含:交叉编译器和 esptool 由 `setup.sh` 下载到 `./tools`(已 gitignore),
 仓库里只提交内核源码和我们自己的代码;所有脚本使用**相对路径**,无任何硬编码。
@@ -25,8 +26,9 @@ freertos-esp32s3-test/
 │   └── bare.ld         链接脚本(RAM 镜像的内存布局)
 ├── freertos/           上游 FreeRTOS-Kernel 源码(tasks.c/list.c/queue.c/heap_4.c 会被编译进来)
 ├── setup.sh            下载工具链 + esptool 到 ./tools
-├── build.sh            编译 + 链接 + 生成镜像 → build/app.bin
-├── run.sh              把镜像加载进 RAM 并监视串口
+├── build.sh            编译 + 链接 + 生成 DIO 镜像 → build/app.bin
+├── run.sh              把镜像加载进 RAM 并监视串口(开发用,掉电即失)
+├── flash.sh            把镜像烧到 flash 0x0(持久化,断电重启自动运行)
 ├── tools/              (setup.sh 生成,gitignore)交叉编译器 + esptool
 └── build/              (build.sh 生成,gitignore)中间产物与 app.elf / app.bin
 ```
@@ -47,8 +49,13 @@ freertos-esp32s3-test/
 git clone -b freertos-esp32s3-test https://github.com/Buyuliang/FreeRTOS.git
 cd FreeRTOS
 ./setup.sh                 # 一次性:下载工具链 + esptool 到 ./tools
-./build.sh                 # 编译 → build/app.bin
-./run.sh /dev/ttyACM1      # 加载进 RAM 运行并监视(RAM 易失,断电需重跑)
+./build.sh                 # 编译 → build/app.bin(DIO 镜像)
+
+# 开发迭代:加载进 RAM 运行(快、掉电即失)
+./run.sh /dev/ttyACM1
+
+# 持久化:烧进 flash,断电重启后自动运行
+./flash.sh /dev/ttyACM1
 ```
 
 正常输出:
@@ -92,25 +99,29 @@ A 任务周期 500ms、B 任务 800ms,交替次数约 8:5,证明抢占式调度 
 | `freertos/portable/MemMang/heap_4.c` | 动态内存(pvPortMalloc) |
 
 关键编译选项(在 `build.sh` 的 `CFLAGS`):
-- `-mabi=call0` —— 用 call0 ABI(无寄存器窗口,详见第六节)。
+- `-mabi=call0` —— 用 call0 ABI(无寄存器窗口,详见第七节)。
 - `-mtext-section-literals` —— 字面量池内联进 .text,便于 l32r 取值。
 - `-ffreestanding -fno-builtin -nostdlib -nostartfiles` —— 无操作系统/无标准库/无默认启动文件。
 - `-I src -I freertos/include` —— 头文件搜索路径(FreeRTOSConfig.h、portmacro.h 在 src)。
 
 ### 4.3 链接(src/bare.ld)
 把所有 `.o` 按 `bare.ld` 的内存布局链接成 `build/app.elf`,并指定入口 `ENTRY(_start)`。
-布局要点(见第五节)。链接后用 `xtensa-esp32s3-elf-size` 看大小。
+布局要点见第五节。链接后用 `xtensa-esp32s3-elf-size` 看大小。
 
 ### 4.4 生成镜像
-`esptool elf2image` 把 `app.elf` 转成 Espressif 镜像 `app.bin`:
+`esptool elf2image --flash_mode dio --flash_freq 40m --flash_size 16MB` 把 `app.elf`
+转成 Espressif 镜像 `app.bin`:
 - 头部魔数 `0xE9`,记录各段的**加载地址(取自 ELF 的 VMA)**、长度、入口地址(`e_entry`=`_start`)、
   校验和与 SHA256。
+- **flash 模式必须用 DIO**:ROM 从 flash 启动时会按头里的模式去读后续段;若用 QIO 而该 flash
+  未做四线使能,ROM 切 QIO 后读段失败,报 `ets_loader.c 78` 无限重启。DIO 稳。
 - 我们的镜像是**纯 RAM 镜像**(所有段都落在内部 SRAM,不依赖 flash cache/XIP)。
 
-### 4.5 加载运行(run.sh)
-`esptool --no-stub load-ram build/app.bin`:通过 ROM 的**下载协议**把各段直接写进 SRAM,
-再跳到入口 `_start` 执行。`--no-stub` 是必须的(esptool 的 stub 会占用 `0x40378000`,与我们的代码冲突)。
-这是 **RAM 运行、掉电即失** 的开发回路;每次断电后重跑 `run.sh` 即可。
+### 4.5 两种运行方式
+- `run.sh`:`esptool --no-stub load-ram` 通过 ROM 下载协议把段直接写进 SRAM 再跳 `_start`。
+  **RAM 运行、掉电即失**,适合开发迭代;`--no-stub` 必须(否则 esptool 的 stub 占 `0x40378000`)。
+- `flash.sh`:`esptool write-flash 0x0` 把镜像写进 flash 起始处。之后**上电/复位由 ROM
+  从 flash 读进 SRAM 自动运行**(持久化)。
 
 ---
 
@@ -148,14 +159,15 @@ IRAM 窗口(放代码+向量表)         DRAM 窗口(放数据/堆/栈)
 ### 阶段 0 — 上电,ROM 接管(不是我们的代码)
 - 复位后 CPU 从 ROM 的复位向量开始执行(`VECBASE` 复位值 `0x40000000` 区域)。
 - ROM bootloader 读 eFuse、判断 boot 模式(由 strapping/GPIO0 决定)。
-- 本工程走**下载模式**:`run.sh` 里 `esptool` 让芯片进入 DOWNLOAD 模式。
+- 两条路:**flash 启动**(正常上电)或**下载模式**(开发时 esptool 触发)。
 
 ### 阶段 1 — 把我们的镜像搬进 SRAM
-- `esptool --no-stub load-ram` 通过 ROM 下载协议的 `mem_write`,把 `app.bin` 的各段
-  逐段写入它们的加载地址(代码→IRAM 0x40378000,数据→DRAM 0x3FCA8000)。
-- 全部写完后,`mem_finish` 让 ROM **跳转到入口 `e_entry`(= `_start`)**。
-  (若换成 flash 启动,则是 ROM 从 flash 0x0 读镜像装进 SRAM 再跳 `_start`;
-   本芯片的 flash 加载器会拒绝我们的 IRAM 段,故开发期用 load_ram,见文末“持久化”。)
+- **flash 启动(持久化,`flash.sh` 烧过之后)**:ROM 读 flash `0x0` 的镜像头,按头里的
+  DIO 模式把各段读进它们的加载地址(代码→IRAM 0x40378000,数据→DRAM 0x3FCA8000),
+  然后跳 `e_entry`(=`_start`)。这正是上电自启的路径。
+- **下载模式(开发,`run.sh`)**:`esptool --no-stub load-ram` 用 ROM 下载协议的
+  `mem_write` 把各段写进 SRAM,再 `mem_finish` 跳 `_start`。掉电即失。
+- 两条路殊途同归:段都在 SRAM 里,CPU 从 `_start` 开始。
 
 ### 阶段 2 — `_start`:我们的第一行代码(src/start.S,call0)
 执行地址在 IRAM(0x40378000 处):
@@ -223,6 +235,9 @@ IRAM 窗口(放代码+向量表)         DRAM 窗口(放数据/堆/栈)
   windowed 函数(所以打印用寄存器直写)。
 - **tick 用 CPU 内部定时器 CCOMPARE0**:不占用任何 SoC 外设,机制与芯片型号无关,最省事。
 - **tick 与 yield 都是 level-1 中断**,统一经 Kernel 异常向量(EXCCAUSE=4)分发,一套切换代码。
+- **持久化不需要单独的二级 bootloader**:我们的 app 镜像本身就是 ROM 从 flash 0x0 直接
+  装进 SRAM 运行的那一个,已扮演“最小二级 bootloader”的角色。只有当 app 超出内部 SRAM、
+  或需要 flash XIP / OTA / 分区表时,才需要再写一个独立的二级 bootloader。
 - **为什么不用上游 `Xtensa_ESP32` port**:它与 ESP-IDF 深度耦合(依赖 `sdkconfig.h`、
   `esp_intr_alloc`、`soc/*`、spinlock 等),无法裸机使用。本移植层只依赖工具链 + 内核源码。
 
@@ -230,9 +245,8 @@ IRAM 窗口(放代码+向量表)         DRAM 窗口(放数据/堆/栈)
 
 ## 八、已知限制 / 后续
 
-- **持久化(flash 自启)**:直接烧到 flash `0x0`,本芯片 ROM 加载器会报 `ets_loader.c 78`
-  拒绝我们的 IRAM 段(flash 启动阶段 ROM 占用了高段 IRAM)。开发期用 `load_ram`(RAM 易失)。
-  要断电自启需要再做一个“最小二级 bootloader”。
 - **tick 精度**:`configCPU_CLOCK_HZ` 目前按 40MHz 估算,若 ROM 实际主频不同,tick 的绝对
   周期会有偏差(但任务间的调度比例正确)。需要精确定时可先测/设主频。
-- 后续可加:队列/信号量 demo、更多异常处理与错误打印、flash 持久化、双核 SMP。
+- 目前是**纯 RAM 镜像**(≤ 内部 SRAM);更大的程序需要启用 flash cache/XIP,并配套一个
+  真正的二级 bootloader 来做 flash 映射。
+- 后续可加:队列/信号量/任务通信 demo、更多异常处理与错误打印、双核 SMP。
